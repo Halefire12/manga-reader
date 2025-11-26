@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MangaFire — Read Manga Online</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --card: #1a1a1a;
+      --accent: #ff2d55;
+      --text: #f5f5f5;
+      --text-muted: #aaaaaa;
+      --border: #333333;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: 'Inter', sans-serif; background:var(--bg); color:var(--text); line-height:1.6; overflow-x:hidden; }
+    
+    header {
+      position:fixed; top:0; left:0; right:0; z-index:1000;
+      background: rgba(10,10,10,0.95); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 0;
+    }
+    nav {
+      max-width:1400px; margin:0 auto; padding:0 2rem;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .logo { font-size:2rem; font-weight:800; background:linear-gradient(135deg,#ff2d55,#ff6b6b); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .search-container {
+      position:relative; width:420px; max-width:100%;
+    }
+    #searchInput {
+      width:100%; padding:0.9rem 1.2rem 0.9rem 3rem;
+      border:none; border-radius:50px; background:#222; color:white;
+      font-size:1rem; outline:none; transition:0.3s;
+    }
+    #searchInput:focus { background:#2a2a2a; box-shadow:0 0 0 3px rgba(255,45,85,0.2); }
+    .search-icon { position:absolute; left:16px; top:50%; transform:translateY(-50%); color:#888; }
+
+    main { margin-top:90px; padding:2rem; max-width:1400px; margin-left:auto; margin-right:auto; }
+    .manga-grid {
+      display:grid; grid-template-columns:repeat(auto-fill,minmax(185px,1fr)); gap:1.8rem;
+    }
+    .manga-card {
+      background:var(--card); border-radius:16px; overflow:hidden; cursor:pointer;
+      transition:transform 0.3s ease, box-shadow 0.3s ease;
+      box-shadow:0 4px 15px rgba(0,0,0,0.4);
+    }
+    .manga-card:hover { transform:translateY(-10px); box-shadow:0 20px 40px rgba(255,45,85,0.15); }
+    .manga-card img { width:100%; height:270px; object-fit:cover; }
+    .manga-info { padding:1rem; }
+    .manga-title { font-weight:600; font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .manga-chap { font-size:0.8rem; color:var(--text-muted); margin-top:4px; }
+
+    /* Reader Modal */
+    #readerModal {
+      display:none; position:fixed; inset:0; z-index:2000;
+      background:#000; overflow-y:auto;
+    }
+    .reader-header {
+      position:sticky; top:0; z-index:10; background:rgba(0,0,0,0.9); backdrop-filter:blur(20px);
+      padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center;
+      border-bottom:1px solid var(--border);
+    }
+    .reader-title { font-size:1.4rem; font-weight:600; }
+    .close-reader { font-size:2.2rem; cursor:pointer; color:var(--accent); }
+    .pages { padding:2rem 1rem; display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .pages img { max-width:100%; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.6); }
+    
+    .reader-controls {
+      position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.8); backdrop-filter:blur(20px);
+      padding:12px 30px; border-radius:50px; display:flex; gap:20px; align-items:center;
+      border:1px solid var(--border);
+    }
+    .ctrl-btn {
+      background:var(--accent); color:white; border:none; padding:12px 28px;
+      border-radius:50px; cursor:pointer; font-weight:600; transition:0.2s;
+    }
+    .ctrl-btn:disabled { background:#444; cursor:not-allowed; }
+    .ctrl-btn:hover:not(:disabled) { background:#ff5a78; transform:scale(1.05); }
+
+    .loading { text-align:center; padding:4rem; font-size:1.3rem; color:var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <nav>
+      <div class="logo">MangaFire</div>
+      <div class="search-container">
+        <i class="fas fa-search search-icon"></i>
+        <input type="text" id="searchInput" placeholder="Search 40,000+ manga..." autocomplete="off"/>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <div id="mangaGrid" class="manga-grid"></div>
+    <div id="loading" class="loading" style="display:none;">Loading manga...</div>
+  </main>
+
+  <!-- Reader -->
+  <div id="readerModal">
+    <div class="reader-header">
+      <div class="reader-title" id="readerTitle"></div>
+      <div class="close-reader" onclick="closeReader()">×</div>
+    </div>
+    <div class="pages" id="pagesContainer"></div>
+    <div class="reader-controls">
+      <button class="ctrl-btn" id="prevChapter">Previous Chapter</button>
+      <button class="ctrl-btn" id="nextChapter">Next Chapter</button>
+    </div>
+  </div>
+
+  <script>
+    const API = 'https://api.mangadex.org';
+    let currentManga = null;
+    let chapterList = [];
+    let currentIndex = 0;
+
+    async function searchManga(q = '') {
+      document.getElementById('loading').style.display = 'block';
+      const res = await fetch(`${API}/manga?title=${encodeURIComponent(q)}&limit=40&includes[]=cover_art&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica`);
+      const json = await res.json();
+      renderManga(json.data || []);
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    function renderManga(list) {
+      const grid = document.getElementById('mangaGrid');
+      grid.innerHTML = '';
+      list.forEach(m => {
+        const title = m.attributes.title.en || Object.values(m.attributes.title)[0] || 'Unknown';
+        const cover = m.relationships.find(r => r.type === 'cover_art')?.attributes?.fileName;
+        const coverUrl = cover ? `https://uploads.mangadex.org/covers/${m.id}/${cover}.512.jpg` : 'https://via.placeholder.com/512?text=No+Cover';
+        const latestChap = m.attributes.lastChapter || '?';
+
+        const card = document.createElement('div');
+        card.className = 'manga-card';
+        card.innerHTML = `
+          <img src="${coverUrl}" loading="lazy" alt="${title}"/>
+          <div class="manga-info">
+            <div class="manga-title">${title}</div>
+            <div class="manga-chap">Ch. ${latestChap}</div>
+          </div>
+        `;
+        card.onclick = () => openManga(m.id, title);
+        grid.appendChild(card);
+      });
+    }
+
+    async function openManga(id, title) {
+      const res = await fetch(`${API}/manga/${id}/feed?translatedLanguage[]=en&limit=500&order[chapter]=asc`);
+      const json = await res.json();
+      chapterList = json.data.filter(ch => ch.attributes.pages > 0);
+      if (!chapterList.length) return alert('No English chapters found.');
+
+      currentManga = { id, title };
+      currentIndex = 0;
+      loadChapter(currentIndex);
+      document.getElementById('readerTitle').textContent = `${title} - Chapter ${chapterList[0].attributes.chapter || 1}`;
+      document.getElementById('readerModal').style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+
+    async function loadChapter(idx) {
+      if (idx < 0 || idx >= chapterList.length) return;
+      currentIndex = idx;
+      const ch = chapterList[idx];
+      const atHome = await fetch(`${API}/at-home/server/${ch.id}`);
+      const data = await atHome.json();
+
+      const base = data.baseUrl;
+      const hash = data.chapter.hash;
+      const pages = [...data.chapter.data, ...data.chapter.dataSaver].map(f => `${base}/data/${hash}/${f}`);
+
+      const container = document.getElementById('pagesContainer');
+      container.innerHTML = pages.map(url => `<img src="${url}" loading="lazy" alt="Page">`).join('');
+
+      document.getElementById('readerTitle').textContent = `${currentManga.title} - Chapter ${ch.attributes.chapter || idx + 1}`;
+      document.getElementById('prevChapter').disabled = idx === 0;
+      document.getElementById('nextChapter').disabled = idx === chapterList.length - 1;
+
+      // Save progress
+      localStorage.setItem(`progress_${currentManga.id}`, idx);
+    }
+
+    function closeReader() {
+      document.getElementById('readerModal').style.display = 'none';
+      document.body.style.overflow = 'auto';
+    }
+
+    document.getElementById('prevChapter').onclick = () => loadChapter(currentIndex - 1);
+    document.getElementById('nextChapter').onclick = () => loadChapter(currentIndex + 1);
+
+    // Search
+    const searchInput = document.getElementById('searchInput');
+    let timeout;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => searchManga(searchInput.value), 400);
+    });
+
+    // Initial popular manga
+    searchManga('');
+  </script>
+</body>
+</html>
